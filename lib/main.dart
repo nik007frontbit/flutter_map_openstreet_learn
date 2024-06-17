@@ -1,8 +1,11 @@
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
+import 'package:geocoding/geocoding.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:latlong2/latlong.dart';
+
+String currentAddress = "Address";
 
 void main() {
   runApp(const MyApp());
@@ -69,20 +72,58 @@ class _MyHomePageState extends State<MyHomePage> {
     getCurrentLocation();
   }
 
+  Future<void> _getAddressFromLatLng(LatLng position) async {
+    await placemarkFromCoordinates(position.latitude, position.longitude)
+        .then((List<Placemark> placemarks) {
+      Placemark place = placemarks[0];
+      setState(() {
+        currentAddress =
+            "${place.street}, ${place.subLocality} ,\n${place.subAdministrativeArea}, ${place.postalCode}";
+      });
+    }).catchError((e) {
+      debugPrint(e);
+    });
+  }
+
   getCurrentLocation() async {
-    if (!await Geolocator.isLocationServiceEnabled()) {
-      await Geolocator.requestPermission();
+    bool isLocationServiceEnabled = await Geolocator.isLocationServiceEnabled();
+    if (!isLocationServiceEnabled) {
+      // Handle the case when location services are not enabled.
+      print("Location services are not enabled");
+      return;
     }
-    if (await Geolocator.isLocationServiceEnabled()) {
+
+    LocationPermission permission = await Geolocator.checkPermission();
+    if (permission == LocationPermission.denied) {
+      permission = await Geolocator.requestPermission();
+      if (permission == LocationPermission.denied) {
+        // Handle the case when permissions are denied
+        print("Location permissions are denied");
+        return;
+      }
+    }
+
+    if (permission == LocationPermission.deniedForever) {
+      // Handle the case when permissions are permanently denied
+      print("Location permissions are permanently denied");
+      return;
+    }
+
+    try {
       var location = await Geolocator.getCurrentPosition();
       latLng = LatLng(location.latitude, location.longitude);
       markers.add(Marker(
         point: latLng!,
         child: const Icon(CupertinoIcons.placemark_fill, color: Colors.green),
       ));
+
+      await _getAddressFromLatLng(latLng!);
       setState(() {
         mapController.move(latLng!, 15.0);
       });
+    } catch (e) {
+      // Handle other exceptions
+      print("Error while getting location: $e");
     }
   }
 
@@ -102,17 +143,20 @@ class _MyHomePageState extends State<MyHomePage> {
         backgroundColor: Theme.of(context).colorScheme.inversePrimary,
         // Here we take the value from the MyHomePage object that was created by
         // the App.build method, and use it to set our appbar title.
-        title: Text(widget.title),
+        title: Text(currentAddress),
       ),
       body: FlutterMap(
         options: MapOptions(
-          onTap: (tapPosition, point) {
+          onTap: (tapPosition, point) async {
             Marker marker = Marker(
               point: point,
               child:
                   const Icon(CupertinoIcons.placemark_fill, color: Colors.red),
             );
             markers.add(marker);
+
+            await _getAddressFromLatLng(
+                LatLng(point.latitude, point.longitude));
             setState(() {});
           },
         ),
